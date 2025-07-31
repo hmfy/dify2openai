@@ -35,7 +35,7 @@ const examples: CodeExample[] = [
     language: 'bash',
     category: 'curl',
     icon: <Terminal className="h-5 w-5" />,
-    code: `curl -X POST "http://localhost:3000/v1/chat/completions" \\
+    code: `curl -X POST "${window.location.protocol}//${window.location.host}/v1/chat/completions" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer YOUR_OPENAI_API_KEY" \\
   -d '{
@@ -57,7 +57,7 @@ const examples: CodeExample[] = [
     language: 'javascript',
     category: 'javascript',
     icon: <Globe className="h-5 w-5" />,
-    code: `const response = await fetch('http://localhost:3000/v1/chat/completions', {
+    code: `const response = await fetch('${window.location.protocol}//${window.location.host}/v1/chat/completions', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
@@ -89,7 +89,7 @@ console.log(data);`
     code: `import requests
 import json
 
-url = "http://localhost:3000/v1/chat/completions"
+url = "${window.location.protocol}//${window.location.host}/v1/chat/completions"
 headers = {
     "Content-Type": "application/json",
     "Authorization": "Bearer YOUR_OPENAI_API_KEY"
@@ -122,7 +122,7 @@ print(result)`
 
 const makeRequest = async () => {
   try {
-    const response = await axios.post('http://localhost:3000/v1/chat/completions', {
+    const response = await axios.post('${window.location.protocol}//${window.location.host}/v1/chat/completions', {
       model: 'gpt-3.5-turbo',
       messages: [
         {
