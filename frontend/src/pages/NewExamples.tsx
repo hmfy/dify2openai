@@ -170,7 +170,23 @@ export default function NewExamples() {
 
   const copyToClipboard = async (code: string, id: string) => {
     try {
-      await navigator.clipboard.writeText(code);
+      // Try modern clipboard API first (HTTPS/localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        // Fallback for HTTP environments
+        const textArea = document.createElement('textarea');
+        textArea.value = code;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      
       setCopiedId(id);
       toast({
         variant: "success",
@@ -182,8 +198,8 @@ export default function NewExamples() {
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Error",
-        description: "Failed to copy code to clipboard.",
+        title: "Copy Failed",
+        description: "Unable to copy to clipboard. Please copy manually.",
       });
     }
   };

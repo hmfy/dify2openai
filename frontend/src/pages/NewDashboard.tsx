@@ -25,6 +25,15 @@ interface Stats {
   successfulCalls: number;
   errorCalls: number;
   successRate: number;
+  avgResponseTime: number;
+  recentLogs: Array<{
+    id: number;
+    method: string;
+    endpoint: string;
+    statusCode: number;
+    responseTime: number;
+    createdAt: string;
+  }>;
 }
 
 interface StatCardProps {
@@ -32,10 +41,10 @@ interface StatCardProps {
   value: string | number;
   description?: string;
   icon: React.ReactNode;
-  trend?: {
+  trend: {
     value: number;
     isPositive: boolean;
-  };
+  } | null;
   color: 'primary' | 'success' | 'warning' | 'info';
 }
 
@@ -62,7 +71,12 @@ const StatCard: React.FC<StatCardProps> = ({
       whileHover={{ scale: 1.02 }}
       className="h-full"
     >
-      <Card className="h-full transition-all duration-200 hover:shadow-lg border-l-4 border-l-primary">
+      <Card className={`h-full transition-all duration-200 hover:shadow-lg border-l-4 ${
+        color === 'primary' ? 'border-l-primary' :
+        color === 'success' ? 'border-l-success' :
+        color === 'warning' ? 'border-l-warning' :
+        'border-l-info'
+      }`}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
             {title}
@@ -106,14 +120,26 @@ export default function NewDashboard() {
 
   const fetchStats = async () => {
     try {
-        const [appsResponse, logsResponse] = await Promise.all([
-          appsAPI.getAll(),
-          logsAPI.getAll({ limit: 5 })
-        ]);
+      const [appsStatsResponse, logsStatsResponse, recentLogsResponse] = await Promise.all([
+        appsAPI.getStats(),
+        logsAPI.getStats(),
+        logsAPI.getAll({ limit: 5 })
+      ]);
+      
+      // Calculate success rate
+      const successRate = logsStatsResponse.data.totalCalls > 0 
+        ? Math.round((logsStatsResponse.data.successfulCalls / logsStatsResponse.data.totalCalls) * 100) 
+        : 100;
       
       setStats({
-        ...appsResponse.data,
-        ...logsResponse.data,
+        totalApps: appsStatsResponse.data.totalApps,
+        activeApps: appsStatsResponse.data.activeApps,
+        totalCalls: logsStatsResponse.data.totalCalls,
+        successfulCalls: logsStatsResponse.data.successfulCalls,
+        errorCalls: logsStatsResponse.data.errorCalls,
+        avgResponseTime: logsStatsResponse.data.avgResponseTime,
+        successRate: successRate,
+        recentLogs: recentLogsResponse.data.data || []
       });
     } catch (error) {
       console.error('Failed to fetch stats:', error);
@@ -141,7 +167,7 @@ export default function NewDashboard() {
       description: 'Registered applications',
       icon: <Smartphone className="h-4 w-4" />,
       color: 'primary' as const,
-      trend: { value: 12, isPositive: true },
+      trend: null, // Removed hardcoded trend
     },
     {
       title: 'Active Applications',
@@ -149,23 +175,23 @@ export default function NewDashboard() {
       description: 'Currently running',
       icon: <CheckCircle className="h-4 w-4" />,
       color: 'success' as const,
-      trend: { value: 8, isPositive: true },
+      trend: null,
     },
     {
-      title: 'API Calls Today',
+      title: 'API Calls',
       value: formatNumber(stats?.totalCalls || 0),
       description: 'Total requests processed',
       icon: <Activity className="h-4 w-4" />,
       color: 'info' as const,
-      trend: { value: 23, isPositive: true },
+      trend: null,
     },
     {
       title: 'Success Rate',
       value: `${stats?.successRate || 0}%`,
       description: 'Request success ratio',
       icon: <BarChart3 className="h-4 w-4" />,
-      color: 'success' as const,
-      trend: { value: 2, isPositive: true },
+      color: stats?.successRate && stats.successRate >= 90 ? 'success' as const : 'warning' as const,
+      trend: null,
     },
   ];
 
@@ -227,7 +253,10 @@ export default function NewDashboard() {
                   </div>
                   <Badge variant="success">Operational</Badge>
                 </div>
-                <Progress value={98} className="h-2" />
+                <Progress value={stats.successRate || 0} className="h-2" />
+                <div className="text-xs text-muted-foreground">
+                  Success Rate: {stats.successRate || 0}% ({stats.successfulCalls || 0} successful / {stats.totalCalls || 0} total)
+                </div>
               </div>
 
               <Separator />
@@ -236,11 +265,17 @@ export default function NewDashboard() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 bg-success rounded-full animate-pulse" />
-                    <span className="text-sm font-medium">Database</span>
+                    <span className="text-sm font-medium">Applications</span>
                   </div>
-                  <Badge variant="success">Connected</Badge>
+                  <Badge variant="success">{stats.activeApps || 0} Active</Badge>
                 </div>
-                <Progress value={95} className="h-2" />
+                <Progress 
+                  value={stats.totalApps ? (stats.activeApps / stats.totalApps) * 100 : 0} 
+                  className="h-2" 
+                />
+                <div className="text-xs text-muted-foreground">
+                  {stats.activeApps || 0} active out of {stats.totalApps || 0} total applications
+                </div>
               </div>
 
               <Separator />
@@ -248,12 +283,18 @@ export default function NewDashboard() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-warning rounded-full animate-pulse" />
-                    <span className="text-sm font-medium">Cache Layer</span>
+                    <div className="w-2 h-2 bg-info rounded-full animate-pulse" />
+                    <span className="text-sm font-medium">Response Time</span>
                   </div>
-                  <Badge variant="warning">Degraded</Badge>
+                  <Badge variant="outline">{stats.avgResponseTime || 0}ms Avg</Badge>
                 </div>
-                <Progress value={78} className="h-2" />
+                <Progress 
+                  value={Math.min(100, stats.avgResponseTime ? (100 - stats.avgResponseTime / 10) : 100)} 
+                  className="h-2" 
+                />
+                <div className="text-xs text-muted-foreground">
+                  Average response time: {stats.avgResponseTime || 0}ms
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -346,26 +387,39 @@ export default function NewDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {[1, 2, 3].map((_, index) => (
-                <motion.div
-                  key={index}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.3, delay: 0.7 + index * 0.1 }}
-                  className="flex items-center gap-4 p-3 rounded-lg border"
-                >
-                  <div className="w-2 h-2 bg-success rounded-full" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">API call successful</p>
-                    <p className="text-xs text-muted-foreground">
-                      POST /api/chat/completions - 200ms
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="text-xs">
-                    2 min ago
-                  </Badge>
-                </motion.div>
-              ))}
+              {stats?.recentLogs && stats.recentLogs.length > 0 ? (
+                stats.recentLogs.map((log, index) => {
+                  const isSuccess = log.statusCode >= 200 && log.statusCode < 300;
+                  const timeAgo = new Date(log.createdAt).toLocaleTimeString();
+                  
+                  return (
+                    <motion.div
+                      key={log.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.3, delay: 0.7 + index * 0.1 }}
+                      className="flex items-center gap-4 p-3 rounded-lg border"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${isSuccess ? 'bg-success' : 'bg-destructive'}`} />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">
+                          {isSuccess ? 'API call successful' : `Error ${log.statusCode}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {log.method} {log.endpoint} - {log.responseTime}ms
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {timeAgo}
+                      </Badge>
+                    </motion.div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-6 text-muted-foreground">
+                  No recent activity found
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

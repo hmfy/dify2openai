@@ -15,6 +15,7 @@ export default defineConfig({
     outDir: '../static',
     assetsDir: 'assets',
     sourcemap: false,
+    emptyOutDir: true,
   },
   server: {
     port: 3001,

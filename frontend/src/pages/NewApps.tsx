@@ -211,13 +211,37 @@ export default function NewApps() {
     setVisibleKeys(newVisibleKeys);
   };
 
-  const copyToClipboard = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    toast({
-      variant: "success",
-      title: "Copied!",
-      description: `${label} copied to clipboard.`,
-    });
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      // Try modern clipboard API first (HTTPS/localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for HTTP environments
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      
+      toast({
+        variant: "success",
+        title: "Copied!",
+        description: `${label} copied to clipboard.`,
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Copy Failed",
+        description: "Unable to copy to clipboard. Please copy manually.",
+      });
+    }
   };
 
   const toggleAppEnabled = async (app: DifyApp) => {
