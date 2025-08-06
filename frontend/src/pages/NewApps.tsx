@@ -15,6 +15,7 @@ import {
   Smartphone,
   Key,
   Globe,
+  Share2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -211,7 +212,35 @@ export default function NewApps() {
     setVisibleKeys(newVisibleKeys);
   };
 
-  const copyToClipboard = async (text: string, label: string) => {
+    const generateShareLink = (app: DifyApp) => {
+    // 加密应用配置信息
+    const shareData = {
+      id: app.id,
+      name: app.name,
+      apiKey: app.generatedApiKey,
+      modelName: app.modelName,
+    };
+    
+    // 简单的base64编码（实际项目中应该使用更安全的加密方式）
+    const encodedData = btoa(JSON.stringify(shareData));
+    const shareUrl = `${window.location.origin}/chat?data=${encodedData}`;
+    
+    // 复制到剪贴板
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      toast({
+        title: "分享链接已复制",
+        description: "分享链接已复制到剪贴板",
+      });
+    }).catch(() => {
+      toast({
+        title: "复制失败",
+        description: "请手动复制链接",
+        variant: "destructive",
+      });
+    });
+  };
+
+  const copyToClipboard = async (text: string, label: string = 'Text') => {
     try {
       // Try modern clipboard API first (HTTPS/localhost)
       if (navigator.clipboard && window.isSecureContext) {
@@ -458,6 +487,15 @@ export default function NewApps() {
 
                   {/* Actions */}
                   <div className="flex gap-2 pt-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => generateShareLink(app)}
+                    >
+                      <Share2 className="h-4 w-4 mr-2" />
+                      Share
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"

@@ -8,6 +8,7 @@ import NewApps from './pages/NewApps';
 import NewApiKeys from './pages/NewApiKeys';
 import NewExamples from './pages/NewExamples';
 import NewLogs from './pages/NewLogs';
+import Chat from './pages/Chat';
 import NewLayout from './components/NewLayout';
 
 function App() {
@@ -28,6 +29,10 @@ function App() {
             <NewRegister />
           </AuthRoute>
         } 
+      />
+      <Route 
+        path="chat" 
+        element={<Chat />} 
       />
       <Route
         path="/"

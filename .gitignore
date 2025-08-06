@@ -127,3 +127,5 @@ frontend/.turbo/
 # Test files
 test-results/
 playwright-report/
+
+.github
