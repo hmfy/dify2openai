@@ -239,7 +239,7 @@ export default function NewApps() {
     };
 
     // 简单的base64编码（实际项目中应该使用更安全的加密方式）
-    const encodedData = btoa(JSON.stringify(shareData));
+    const encodedData = btoa(encodeURIComponent(JSON.stringify(shareData)));
     const shareUrl = `${window.location.origin}/#/chat?data=${encodedData}`;
 
     // Try modern clipboard API first (HTTPS/localhost)

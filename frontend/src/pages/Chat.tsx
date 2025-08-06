@@ -84,7 +84,7 @@ export default function Chat() {
     }
 
     try {
-      const decodedData = JSON.parse(atob(data));
+      const decodedData = JSON.parse(decodeURIComponent(atob(data)));
       setAppConfig(decodedData);
       
       // 检查是否有当前会话ID（页面刷新后恢复）
