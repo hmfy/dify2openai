@@ -223,7 +223,7 @@ export default function NewApps() {
     
     // 简单的base64编码（实际项目中应该使用更安全的加密方式）
     const encodedData = btoa(JSON.stringify(shareData));
-    const shareUrl = `${window.location.origin}/chat?data=${encodedData}`;
+    const shareUrl = `${window.location.origin}/#/chat?data=${encodedData}`;
     
     // 复制到剪贴板
     navigator.clipboard.writeText(shareUrl).then(() => {
