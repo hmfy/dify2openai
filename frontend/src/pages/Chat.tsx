@@ -228,10 +228,13 @@ export default function Chat() {
     // 当有新消息且有当前会话时，保存消息到后端
     if (currentSessionId && messages.length > 0) {
       // 只处理新的消息（不以saved_、history_开头，且不是welcome消息）
+      // 同时排除正在流式更新的消息（当isLoading为true时跳过所有AI消息）
       const newMessages = messages.filter(msg => 
         msg.id !== 'welcome' && 
         !msg.id.startsWith('history_') &&
-        !msg.id.startsWith('saved_')
+        !msg.id.startsWith('saved_') &&
+        // 如果当前正在加载且消息是AI消息，则跳过保存
+        !(isLoading && msg.role === 'assistant')
       );
       
       if (newMessages.length === 0) return;
@@ -283,7 +286,7 @@ export default function Chat() {
       
       saveMessages();
     }
-  }, [messages, currentSessionId]);
+  }, [messages, currentSessionId, isLoading]);
 
   const updateSessionTitle = async (sessionId: string, title: string) => {
     try {
@@ -314,6 +317,22 @@ export default function Chat() {
       timestamp: Date.now(),
     };
 
+    // 创建AI回复消息
+    const assistantMessageId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+
+    // 构建包含新用户消息的历史消息列表
+    const currentMessages = [
+      ...messages.filter(msg => msg.id !== 'welcome'),
+      userMessage
+    ];
+
+    // 先添加用户消息
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
@@ -328,11 +347,8 @@ export default function Chat() {
         },
         body: JSON.stringify({
           model: appConfig.modelName || 'gpt-3.5-turbo',
-          messages: [
-            ...messages.filter(msg => msg.id !== 'welcome').map(msg => ({ role: msg.role, content: msg.content })),
-            { role: 'user', content: userMessage.content }
-          ],
-          stream: false,
+          messages: currentMessages.map(msg => ({ role: msg.role, content: msg.content })),
+          stream: true,
         }),
       });
 
@@ -340,16 +356,108 @@ export default function Chat() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.choices[0]?.message?.content || '抱歉，我无法生成回复。',
-        timestamp: Date.now(),
-      };
-
+      // 请求成功后再添加空的AI消息
       setMessages(prev => [...prev, assistantMessage]);
+
+      // 处理流式响应
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let content = '';
+
+      if (reader) {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // 解码数据块
+            const chunk = decoder.decode(value, { stream: true });
+            
+            // 按行分割
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              const trimmedLine = line.trim();
+              
+              // 跳过空行
+              if (!trimmedLine) continue;
+              
+              // 检查是否是 data: 开头的行
+              if (trimmedLine.startsWith('data: ')) {
+                const data = trimmedLine.slice(6).trim();
+                
+                // 检查是否是结束标志
+                if (data === '[DONE]') {
+                  break;
+                }
+
+                try {
+                  const parsed = JSON.parse(data);
+                  const delta = parsed.choices?.[0]?.delta?.content;
+                  
+                  // 只有当 delta.content 存在且不为 undefined 时才添加
+                  if (delta !== undefined && delta !== null) {
+                    content += delta;
+                    console.log('Received delta:', delta);
+                    console.log('Total content so far:', content);
+                    console.log('Assistant message ID:', assistantMessageId);
+                    
+                    // 实时更新消息内容 - 使用函数式更新确保状态同步
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === assistantMessageId) {
+                          console.log('Updating message:', msg.id, 'with content:', content);
+                          return { ...msg, content: content };
+                        }
+                        return msg;
+                      });
+                      console.log('Updated messages:', updated);
+                      return updated;
+                    });
+                  }
+                } catch (parseError) {
+                  // 忽略解析错误的行，但记录日志以便调试
+                  console.warn('Failed to parse SSE data:', data, parseError);
+                }
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock();
+          
+          // 流式响应结束，手动保存AI消息
+          if (content && currentSessionId) {
+            try {
+              const response = await fetch('/api/chat/messages', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  sessionId: currentSessionId,
+                  role: 'assistant',
+                  content: content,
+                }),
+              });
+              
+              if (response.ok) {
+                console.log('AI message saved to database:', content.slice(0, 50) + '...');
+                // 标记消息为已保存
+                setMessages(prev => prev.map(msg => 
+                  msg.id === assistantMessageId 
+                    ? { ...msg, id: `saved_${msg.id}` }
+                    : msg
+                ));
+              }
+            } catch (error) {
+              console.error('Failed to save AI message:', error);
+            }
+          }
+        }
+      }
     } catch (err) {
+      // 如果发生错误，需要移除之前添加的空AI消息
+      setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId));
       setError('发送消息失败，请重试');
       console.error('Error sending message:', err);
     } finally {
@@ -795,10 +903,10 @@ export default function Chat() {
               )}
               
               {isLoading && (
-                <div className="flex items-start space-x-3">
-                  <div className="w-8 h-8 bg-[#3B82F6] rounded-full flex items-center justify-center">
+                <div className="flex items-start space-x-3 ml-10">
+                  {/* <div className="w-8 h-8 bg-[#3B82F6] rounded-full flex items-center justify-center">
                     <Bot className="w-5 h-5 text-white" />
-                  </div>
+                  </div> */}
                   <div className="flex items-center space-x-2">
                     <Loader2 className="w-4 h-4 animate-spin text-[#6B7280]" />
                     <span className="text-[14px] text-[#6B7280]">正在思考...</span>
@@ -812,8 +920,8 @@ export default function Chat() {
         </div>
 
         {/* 输入框区域 - 固定在底部 */}
-        <div className="flex-shrink-0 bg-white">
-          <div className="max-w-[768px] mx-auto w-full px-6 pt-4 pb-6">
+        <div className="flex-shrink-0 bg-gradient-to-t from-white via-white to-white/80 backdrop-blur-sm">
+          <div className="max-w-[768px] mx-auto w-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6">
             {error && (
               <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-red-700 text-sm">
                 <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -822,9 +930,9 @@ export default function Chat() {
             )}
             
             {/* 输入框容器 */}
-            <div className="bg-white border border-[#E5E7EB] rounded-xl shadow-[0_4px_6px_-1px_rgba(0,0,0,0.1),0_2px_4px_-2px_rgba(0,0,0,0.1)] p-6">
-              <div className="flex items-end space-x-2">
-                <div className="flex-1">
+            <div className="group relative bg-white border border-[#E5E7EB] rounded-2xl md:rounded-xl shadow-sm hover:shadow-md focus-within:shadow-lg transition-all duration-300 ease-in-out focus-within:border-[#3B82F6] hover:border-[#D1D5DB]">
+              <div className="flex items-end gap-2 md:gap-3 p-3 md:p-4">
+                <div className="flex-1 relative">
                   <textarea
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
@@ -835,38 +943,72 @@ export default function Chat() {
                       }
                     }}
                     placeholder={`给 ${appConfig?.name || 'AI助手'} 发送消息`}
-                    className="w-full px-0 py-2 text-[14px] placeholder-[#9CA3AF] border-0 outline-none resize-none bg-transparent"
-                    rows={4}
+                    className="w-full px-0 py-2 md:py-3 text-[14px] md:text-[15px] placeholder-[#9CA3AF] border-0 outline-none resize-none bg-transparent leading-relaxed transition-all duration-200"
+                    rows={1}
                     disabled={isLoading}
                     style={{
-                      minHeight: '120px',
-                      maxHeight: '200px',
+                      minHeight: isMobile ? '44px' : '50px',
+                      maxHeight: isMobile ? '120px' : '150px',
                     }}
                     onInput={(e: any) => {
                       e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+                      const maxHeight = isMobile ? 120 : 150;
+                      e.target.style.height = Math.min(e.target.scrollHeight, maxHeight) + 'px';
                     }}
                   />
+                  
+                  {/* 输入框内部装饰线 */}
+                  <div className="absolute bottom-0 left-0 right-12 md:right-16 h-px bg-gradient-to-r from-transparent via-[#E5E7EB] to-transparent opacity-0 group-focus-within:opacity-100 transition-opacity duration-300"></div>
                 </div>
-                <div className="flex items-center space-x-2">
+                
+                {/* 发送按钮 */}
+                <div className="flex items-end pb-1">
                   <button
                     onClick={sendMessage}
                     disabled={!inputValue.trim() || isLoading}
-                    className="w-8 h-8 bg-[#3B82F6] rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[#2563EB]"
+                    className={`
+                      relative overflow-hidden flex items-center justify-center rounded-full 
+                      bg-gradient-to-r from-[#3B82F6] to-[#2563EB] 
+                      disabled:from-[#D1D5DB] disabled:to-[#9CA3AF]
+                      transition-all duration-300 ease-out
+                      transform hover:scale-105 active:scale-95
+                      disabled:hover:scale-100 disabled:cursor-not-allowed
+                      shadow-sm hover:shadow-md disabled:shadow-none
+                      ${isMobile ? 'w-9 h-9' : 'w-10 h-10'}
+                      ${!inputValue.trim() || isLoading ? '' : 'hover:shadow-[#3B82F6]/25'}
+                    `}
                   >
-                    {isLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    ) : (
-                      <Send className="w-4 h-4 text-white" />
-                    )}
+                    {/* 按钮背景动效 */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300"></div>
+                    
+                    {/* 按钮图标 */}
+                    <div className="relative z-10 transition-transform duration-200">
+                      {isLoading ? (
+                        <Loader2 className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} animate-spin text-white`} />
+                      ) : (
+                        <Send className={`${isMobile ? 'w-4 h-4' : 'w-5 h-5'} text-white transform transition-transform duration-200`} />
+                      )}
+                    </div>
+                    
+                    {/* 点击涟漪效果 */}
+                    <div className="absolute inset-0 rounded-full opacity-0 bg-white/30 transform scale-0 transition-all duration-300 pointer-events-none group-active:opacity-100 group-active:scale-100"></div>
                   </button>
                 </div>
               </div>
             </div>
             
             {/* 底部提示 */}
-            <div className="flex justify-between items-center mt-3">
-              <span className="text-[12px] text-[#9CA3AF]">内容由AI生成，请仔细甄别</span>
+            <div className="flex justify-between items-center mt-3 px-1">
+              <span className="text-[11px] md:text-[12px] text-[#9CA3AF] transition-colors duration-200 hover:text-[#6B7280]">
+                内容由AI生成，请仔细甄别
+              </span>
+              
+              {/* 移动端快捷操作提示 */}
+              {isMobile && (
+                <span className="text-[11px] text-[#9CA3AF] opacity-70">
+                  Enter发送 • Shift+Enter换行
+                </span>
+              )}
             </div>
           </div>
         </div>
